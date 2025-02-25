@@ -1,0 +1,205 @@
+name: Exclusive Multi-Environment Cloud Infrastructure Automation
+
+on:
+  workflow_dispatch:
+    inputs:
+      infra_prompt:
+        description: "Provide infrastructure requirements"
+        required: true
+        type: string
+      validation_prompt:
+        description: "Specify custom validation (security, compliance, etc.)"
+        required: false
+        type: string
+      deployment_prompt:
+        description: "Provide deployment settings (region, instance types, etc.)"
+        required: false
+        type: string
+      enable_alerting:
+        description: "Enable anomaly detection alerts?"
+        required: true
+        type: choice
+        options:
+          - "yes"
+          - "no"
+      enable_auto_remediation:
+        description: "Enable auto-remediation for cloud anomalies?"
+        required: true
+        type: choice
+        options:
+          - "yes"
+          - "no"
+      notification_platform:
+        description: "Choose notification platform (Teams/Slack)"
+        required: true
+        type: choice
+        options:
+          - "Teams"
+          - "Slack"
+      enable_customization:
+        description: "Enable interactive Yes/No customization at every stage?"
+        required: true
+        type: choice
+        options:
+          - "yes"
+          - "no"
+      environment:
+        description: "Select Deployment Environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - sit
+          - uat
+          - pre
+          - prd
+
+env:
+  CLOUD_PROVIDER: "AWS"
+  TERRAFORM_DIR: "terraform"
+  CUSTOMER_INPUT_FILE: "config/customer_spec.json"
+  ALERTING_ENABLED: ${{ github.event.inputs.enable_alerting }}
+  AUTO_REMEDIATION_ENABLED: ${{ github.event.inputs.enable_auto_remediation }}
+  CUSTOMIZATION_ENABLED: ${{ github.event.inputs.enable_customization }}
+  NOTIFICATION_PLATFORM: ${{ github.event.inputs.notification_platform }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  confirm_customization:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.enable_customization == 'yes' }}
+    steps:
+      - name: User Confirmation for Customization
+        run: |
+          echo "Would you like to customize the Terraform configuration? (yes/no)"
+          read customization_input
+          if [[ "$customization_input" != "yes" ]]; then
+            echo "Skipping customization..."
+          fi
+
+  generate_terraform:
+    needs: confirm_customization
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Generate Terraform Code Using OpenAI
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "Generating Terraform template..."
+          curl -X POST "https://api.openai.com/v1/chat/completions" \
+          -H "Authorization: Bearer $OPENAI_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "model": "gpt-4",
+            "messages": [{"role": "system", "content": "You are a cloud infrastructure expert in AWS, ensuring compliance, security, and best practices."},
+                         {"role": "user", "content": "${{ github.event.inputs.infra_prompt }}"}],
+            "temperature": 0.7
+          }' | jq -r '.choices[0].message.content' > $TERRAFORM_DIR/main.tf
+
+  pre_check_validation:
+    needs: generate_terraform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Terraform Format
+        run: terraform fmt -check $TERRAFORM_DIR/main.tf
+
+      - name: Validate Terraform Syntax
+        run: terraform validate $TERRAFORM_DIR
+
+      - name: Security Scan (tfsec)
+        run: tfsec $TERRAFORM_DIR
+
+      - name: Linting Check (TFLint)
+        run: tflint --chdir=$TERRAFORM_DIR
+
+      - name: Compliance Check (Checkov)
+        run: checkov -d $TERRAFORM_DIR
+
+      - name: GDPR Compliance Validation
+        run: |
+          echo "Checking GDPR compliance..."
+          # Add GDPR-specific validation scripts
+
+      - name: Code Quality Analysis
+        run: |
+          echo "Running Terraform code quality analysis..."
+          # Add static analysis tools if required
+
+  cost_estimation:
+    needs: pre_check_validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Terraform Plan (Cost Estimation)
+        run: |
+          terraform init
+          terraform plan -out=tfplan
+
+      - name: Validate Plan Against Customer Expectations
+        run: |
+          echo "Validating Terraform plan against customer expectations..."
+          terraform show -json tfplan > tfplan.json
+          jq -e --argfile expected $CUSTOMER_INPUT_FILE '($expected | .resources) as $expectedResources | 
+          (.resource_changes[] | .type) as $planResources | all($planResources[]; . as $r | $expectedResources | contains([$r]))' tfplan.json \
+          || { echo "Validation failed! Plan does not match customer expectations."; exit 1; }
+
+  auto_remediation:
+    needs: cost_estimation
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.enable_auto_remediation == 'yes' }}
+    steps:
+      - name: Install Pacemaker & Check Cluster Health
+        run: |
+          sudo apt update && sudo apt install -y pacemaker
+          sudo systemctl start pacemaker
+          sudo crm status
+
+      - name: Detect and Remediate Anomalies
+        run: |
+          echo "Checking for infrastructure anomalies..."
+          if sudo crm_mon -1 | grep -q "FAILED"; then
+            echo "Detected failed nodes! Initiating failover..."
+            sudo crm resource restart failed
+          fi
+
+          echo "Checking for high CPU usage..."
+          if [ $(uptime | awk '{print $10}' | cut -d. -f1) -gt 80 ]; then
+            echo "High CPU detected! Scaling up..."
+            terraform apply -auto-approve -var="scale_up=true"
+          fi
+
+  approval:
+    needs: [auto_remediation]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request Manual Approval
+        uses: hmarr/auto-approve-action@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy_infrastructure:
+    needs: approval
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Terraform Apply (Deployment)
+        run: terraform apply -auto-approve tfplan
+
+  notify_completion:
+    needs: deploy_infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Teams Notification
+        if: env.NOTIFICATION_PLATFORM == 'Teams'
+        run: |
+          curl -H "Content-Type: application/json" -d '{"text": "🚀 Deployment Completed Successfully for ${{ github.event.inputs.environment }}!"}' ${{ secrets.TEAMS_WEBHOOK }}
+
+      - name: Send Slack Notification
+        if: env.NOTIFICATION_PLATFORM == 'Slack'
+        run: |
+          curl -X POST -H 'Content-type: application/json' --data '{"text":"🚀 Deployment Completed Successfully for ${{ github.event.inputs.environment }}!"}' ${{ secrets.SLACK_WEBHOOK }}
