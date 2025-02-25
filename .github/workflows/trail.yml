@@ -1,0 +1,54 @@
+name: Prompt-Based EC2 Instance Creation
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_prompt:
+        description: "Describe the EC2 instance you want to create (e.g., t2.micro in us-east-1)"
+        required: true
+        type: string
+
+jobs:
+  generate_terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Generate Terraform Configuration Using OpenAI
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          echo "Generating Terraform configuration..."
+          curl -X POST "https://api.openai.com/v1/chat/completions" \
+          -H "Authorization: Bearer $OPENAI_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "model": "gpt-4",
+            "messages": [{"role": "system", "content": "You are an AWS Terraform expert."},
+                         {"role": "user", "content": "Write a Terraform script to create an EC2 instance: ${{ github.event.inputs.instance_prompt }}"}],
+            "temperature": 0.7
+          }' | jq -r '.choices[0].message.content' > main.tf
+
+      - name: Show Generated Terraform Code
+        run: cat main.tf
+
+  validate_terraform:
+    needs: generate_terraform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Terraform Syntax
+        run: terraform validate
+
+      - name: Run Terraform Plan (Dry Run)
+        run: terraform plan -out=tfplan
+
+  apply_terraform:
+    needs: validate_terraform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy EC2 Instance
+        run: terraform apply -auto-approve tfplan
+
+      - name: Show Instance Details
+        run: terraform output
