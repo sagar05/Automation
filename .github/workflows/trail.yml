@@ -42,12 +42,13 @@ jobs:
     needs: generate_terraform
     runs-on: ubuntu-latest
     steps:
-      - name: Install Terraform
-        run: |
-          sudo apt-get update && sudo apt-get install -y gnupg software-properties-common curl
-          curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
-          sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
-          sudo apt-get update && sudo apt-get install -y terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: latest  # You can specify a version like "1.5.0"
+
+      - name: Verify Terraform Installation
+        run: terraform --version  # Ensure Terraform is properly installed
 
       - name: Validate Terraform Syntax
         run: terraform validate
@@ -59,12 +60,13 @@ jobs:
     needs: validate_terraform
     runs-on: ubuntu-latest
     steps:
-      - name: Install Terraform
-        run: |
-          sudo apt-get update && sudo apt-get install -y gnupg software-properties-common curl
-          curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
-          sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
-          sudo apt-get update && sudo apt-get install -y terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: latest  # You can specify a version like "1.5.0"
+
+      - name: Verify Terraform Installation
+        run: terraform --version  # Ensure Terraform is properly installed
 
       - name: Deploy EC2 Instance
         run: terraform apply -auto-approve tfplan
