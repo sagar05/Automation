@@ -15,77 +15,98 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Use the official Terraform GitHub Action
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: latest  # You can specify a version like "1.5.0"
-
-      - name: Verify Terraform Installation
-        run: terraform --version  # Ensure Terraform is properly installed
+      - name: Create Terraform Directory
+        run: mkdir -p terraform
 
       - name: Generate Terraform Configuration Using OpenAI
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           echo "Generating Terraform configuration..."
-          curl -X POST "https://api.openai.com/v1/chat/completions" \
+          RESPONSE=$(curl -s -X POST "https://api.openai.com/v1/chat/completions" \
             -H "Authorization: Bearer $OPENAI_API_KEY" \
             -H "Content-Type: application/json" \
             -d '{
               "model": "gpt-4",
-              "messages": [{"role": "system", "content": "You are an AWS Terraform expert."}]
-            }'
+              "messages": [
+                {"role": "system", "content": "You are an AWS Terraform expert. Generate a main.tf file based on the user input."},
+                {"role": "user", "content": "${{ github.event.inputs.instance_prompt }}"}
+              ]
+            }' | jq -r '.choices[0].message.content')
 
+          echo "$RESPONSE" > terraform/main.tf
+
+      - name: List Generated Files
+        run: ls -R terraform
+
+      - name: Upload Terraform Files as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-files
+          path: terraform/
 
   validate_terraform:
     needs: generate_terraform
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Terraform Files
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-files
+          path: terraform/
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: latest  # You can specify a version like "1.5.0"
-      - name: Install Terraform
-        run: |
-          sudo apt-get update && sudo apt-get install -y gnupg software-properties-common curl
-          curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
-          sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
-          sudo apt-get update && sudo apt-get install -y terraform
-
-      - name: Verify Terraform Installation
-        run: terraform --version  # Ensure Terraform is properly installed
+          terraform_version: latest
 
       - name: Initialize Terraform
-        run: |
-          cd terraform
-          terraform init
-
-      - name: Plan Terraform Deployment
-        run: |
-          cd terraform
-          terraform plan
+        run: terraform -chdir=terraform init
 
       - name: Validate Terraform Syntax
-        run: terraform validate
-      
+        run: terraform -chdir=terraform validate
+
       - name: Run Terraform Plan (Dry Run)
-        run: terraform plan -out=tfplan
+        run: terraform -chdir=terraform plan -out=tfplan
+
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: terraform/tfplan
 
   apply_terraform:
     needs: validate_terraform
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Terraform Files
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-files
+          path: terraform/
+
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: terraform/
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: latest  # You can specify a version like "1.5.0"
+          terraform_version: latest
 
-      - name: Verify Terraform Installation
-        run: terraform --version  # Ensure Terraform is properly installed
+      - name: Initialize Terraform
+        run: terraform -chdir=terraform init
 
       - name: Deploy EC2 Instance
-        run: terraform apply -auto-approve tfplan
+        run: terraform -chdir=terraform apply -auto-approve tfplan
 
       - name: Show Instance Details
-        run: terraform output
+        run: terraform -chdir=terraform output
