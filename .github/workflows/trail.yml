@@ -15,12 +15,14 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Terraform
-        run: |
-          sudo apt-get update && sudo apt-get install -y gnupg software-properties-common curl
-          curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
-          sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
-          sudo apt-get update && sudo apt-get install -y terraform
+      # Use the official Terraform GitHub Action
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: latest  # You can specify a version like "1.5.0"
+
+      - name: Verify Terraform Installation
+        run: terraform --version  # Ensure Terraform is properly installed
 
       - name: Generate Terraform Configuration Using OpenAI
         env:
@@ -28,17 +30,13 @@ jobs:
         run: |
           echo "Generating Terraform configuration..."
           curl -X POST "https://api.openai.com/v1/chat/completions" \
-          -H "Authorization: Bearer $OPENAI_API_KEY" \
-          -H "Content-Type: application/json" \
-          -d '{
-            "model": "gpt-4",
-            "messages": [{"role": "system", "content": "You are an AWS Terraform expert."},
-                         {"role": "user", "content": "Write a Terraform script to create an EC2 instance: ${{ github.event.inputs.instance_prompt }}"}],
-            "temperature": 0.7
-          }' | jq -r '.choices[0].message.content' > main.tf
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "model": "gpt-4",
+              "messages": [{"role": "system", "content": "You are an AWS Terraform expert."}]
+            }'
 
-      - name: Show Generated Terraform Code
-        run: cat main.tf
 
   validate_terraform:
     needs: generate_terraform
