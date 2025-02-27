@@ -56,9 +56,19 @@ jobs:
       - name: Verify Terraform Installation
         run: terraform --version  # Ensure Terraform is properly installed
 
+      - name: Initialize Terraform
+        run: |
+          cd terraform
+          terraform init
+
+      - name: Plan Terraform Deployment
+        run: |
+          cd terraform
+          terraform plan
+
       - name: Validate Terraform Syntax
         run: terraform validate
-
+      
       - name: Run Terraform Plan (Dry Run)
         run: terraform plan -out=tfplan
 
