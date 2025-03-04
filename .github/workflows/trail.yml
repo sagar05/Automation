@@ -3,24 +3,41 @@ name: Prompt-Based EC2 Instance Creation
 on:
   workflow_dispatch:
     inputs:
-      instance_prompt:
-        description: "Describe the EC2 instance you want to create (e.g., t2.micro in us-east-1)"
+      instance_type:
+        description: "Enter EC2 instance type (e.g., t2.micro, t3.medium)"
         required: true
-        type: string
+        default: "t2.micro"
+      region:
+        description: "Enter AWS Region (e.g., us-east-1, eu-west-1)"
+        required: true
+        default: "us-east-1"
+      security_group:
+        description: "Enter Security Group ID (e.g., sg-xxxxxxxx)"
+        required: true
+        default: "sg-xxxxxxx"
 
 jobs:
-  generate_terraform:
+  deploy_ec2:
     runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ inputs.region }}
+      INSTANCE_TYPE: ${{ inputs.instance_type }}
+      SECURITY_GROUP: ${{ inputs.security_group }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Create Terraform Directory
-        run: mkdir -p terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: latest
+
+      - name: Verify Terraform Installation
+        run: terraform --version
 
       - name: Generate Terraform Configuration Using OpenAI
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           echo "Generating Terraform configuration..."
           RESPONSE=$(curl -s -X POST "https://api.openai.com/v1/chat/completions" \
@@ -29,84 +46,25 @@ jobs:
             -d '{
               "model": "gpt-4",
               "messages": [
-                {"role": "system", "content": "You are an AWS Terraform expert. Generate a main.tf file based on the user input."},
-                {"role": "user", "content": "${{ github.event.inputs.instance_prompt }}"}
+                {"role": "system", "content": "You are an AWS Terraform expert."},
+                {"role": "user", "content": "Write a Terraform configuration to deploy an EC2 instance in '${AWS_REGION}' with type '${INSTANCE_TYPE}' and security group '${SECURITY_GROUP}'"}
               ]
-            }' | jq -r '.choices[0].message.content')
+            }')
 
-          echo "$RESPONSE" > terraform/main.tf
-
-      - name: List Generated Files
-        run: ls -R terraform
-
-      - name: Upload Terraform Files as Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: terraform-files
-          path: terraform/
-
-  validate_terraform:
-    needs: generate_terraform
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Download Terraform Files
-        uses: actions/download-artifact@v4
-        with:
-          name: terraform-files
-          path: terraform/
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: latest
+          echo "$RESPONSE" | jq -r '.choices[0].message.content' > ec2_instance.tf
+          cat ec2_instance.tf
 
       - name: Initialize Terraform
-        run: terraform -chdir=terraform init
+        run: terraform init
 
       - name: Validate Terraform Syntax
-        run: terraform -chdir=terraform validate
+        run: terraform validate
 
       - name: Run Terraform Plan (Dry Run)
-        run: terraform -chdir=terraform plan -out=tfplan
+        run: terraform plan -out=tfplan
 
-      - name: Upload Terraform Plan
-        uses: actions/upload-artifact@v4
-        with:
-          name: terraform-plan
-          path: terraform/tfplan
-
-  apply_terraform:
-    needs: validate_terraform
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Download Terraform Files
-        uses: actions/download-artifact@v4
-        with:
-          name: terraform-files
-          path: terraform/
-
-      - name: Download Terraform Plan
-        uses: actions/download-artifact@v4
-        with:
-          name: terraform-plan
-          path: terraform/
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: latest
-
-      - name: Initialize Terraform
-        run: terraform -chdir=terraform init
-
-      - name: Deploy EC2 Instance
-        run: terraform -chdir=terraform apply -auto-approve tfplan
+      - name: Apply Terraform and Deploy EC2
+        run: terraform apply -auto-approve tfplan
 
       - name: Show Instance Details
-        run: terraform -chdir=terraform output
+        run: terraform output
