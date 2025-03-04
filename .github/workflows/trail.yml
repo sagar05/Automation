@@ -47,11 +47,21 @@ jobs:
               "model": "gpt-4",
               "messages": [
                 {"role": "system", "content": "You are an AWS Terraform expert."},
-                {"role": "user", "content": "Write a Terraform configuration to deploy an EC2 instance in '${AWS_REGION}' with type '${INSTANCE_TYPE}' and security group '${SECURITY_GROUP}'"}
+                {"role": "user", "content": "Write a complete Terraform configuration to deploy an EC2 instance in '${AWS_REGION}' with type '${INSTANCE_TYPE}' and security group '${SECURITY_GROUP}'. Ensure it is valid and includes required AWS provider details."}
               ]
             }')
 
-          echo "$RESPONSE" | jq -r '.choices[0].message.content' > ec2_instance.tf
+          # Extract only the Terraform config from the OpenAI response
+          CONFIG=$(echo "$RESPONSE" | jq -r '.choices[0].message.content')
+
+          # Check if the response contains Terraform code
+          if [[ -z "$CONFIG" || "$CONFIG" == "null" ]]; then
+            echo "Error: OpenAI did not return a valid Terraform configuration."
+            exit 1
+          fi
+
+          # Save to a Terraform file
+          echo "$CONFIG" > ec2_instance.tf
           cat ec2_instance.tf
 
           echo "Initializing Terraform..."
@@ -65,6 +75,7 @@ jobs:
 
           echo "Applying Terraform..."
           terraform apply -auto-approve tfplan
+
 
       - name: Show Instance Details
         run: terraform output
