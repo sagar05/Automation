@@ -40,6 +40,8 @@ jobs:
       - name: Generate, Validate & Deploy Terraform
         run: |
           echo "Generating Terraform configuration..."
+          
+          # Store OpenAI response in a variable
           RESPONSE=$(curl -s -X POST "https://api.openai.com/v1/chat/completions" \
             -H "Authorization: Bearer $OPENAI_API_KEY" \
             -H "Content-Type: application/json" \
@@ -47,22 +49,27 @@ jobs:
               "model": "gpt-4",
               "messages": [
                 {"role": "system", "content": "You are an AWS Terraform expert."},
-                {"role": "user", "content": "Write a complete Terraform configuration to deploy an EC2 instance in '${AWS_REGION}' with type '${INSTANCE_TYPE}' and security group '${SECURITY_GROUP}'. Ensure it is valid and includes required AWS provider details."}
-              ]
+                {"role": "user", "content": "Write a complete Terraform configuration to deploy an EC2 instance. Instance type: '${INSTANCE_TYPE}', Region: '${AWS_REGION}', Security Group: '${SECURITY_GROUP}'. Include provider configuration and ensure it is valid."}
+              ],
+              "temperature": 0.2,
+              "max_tokens": 500
             }')
 
-          # Extract only the Terraform config from the OpenAI response
+          # Log full OpenAI response for debugging
+          echo "OpenAI Response: $RESPONSE"
+
+          # Extract only the Terraform code from OpenAI response
           CONFIG=$(echo "$RESPONSE" | jq -r '.choices[0].message.content')
 
-          # Check if the response contains Terraform code
+          # Debug: Check if CONFIG is empty
           if [[ -z "$CONFIG" || "$CONFIG" == "null" ]]; then
             echo "Error: OpenAI did not return a valid Terraform configuration."
             exit 1
           fi
 
-          # Save to a Terraform file
-          echo "$CONFIG" > ec2_instance.tf
-          cat ec2_instance.tf
+          # Save Terraform config to file
+          echo "$CONFIG" > terraform/ec2_instance.tf
+          cat terraform/ec2_instance.tf
 
           echo "Initializing Terraform..."
           terraform init
@@ -75,6 +82,7 @@ jobs:
 
           echo "Applying Terraform..."
           terraform apply -auto-approve tfplan
+
 
 
       - name: Show Instance Details
