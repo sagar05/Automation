@@ -37,7 +37,7 @@ jobs:
       - name: Verify Terraform Installation
         run: terraform --version
 
-      - name: Generate Terraform Configuration Using OpenAI
+      - name: Generate, Validate & Deploy Terraform
         run: |
           echo "Generating Terraform configuration..."
           RESPONSE=$(curl -s -X POST "https://api.openai.com/v1/chat/completions" \
@@ -54,17 +54,17 @@ jobs:
           echo "$RESPONSE" | jq -r '.choices[0].message.content' > ec2_instance.tf
           cat ec2_instance.tf
 
-      - name: Initialize Terraform
-        run: terraform init
+          echo "Initializing Terraform..."
+          terraform init
 
-      - name: Validate Terraform Syntax
-        run: terraform validate
+          echo "Validating Terraform..."
+          terraform validate
 
-      - name: Run Terraform Plan (Dry Run)
-        run: terraform plan -out=tfplan
+          echo "Running Terraform Plan..."
+          terraform plan -out=tfplan
 
-      - name: Apply Terraform and Deploy EC2
-        run: terraform apply -auto-approve tfplan
+          echo "Applying Terraform..."
+          terraform apply -auto-approve tfplan
 
       - name: Show Instance Details
         run: terraform output
